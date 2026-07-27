@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const session = require('express-session');
-const MemoryStore = require('memorystore')(session);
+const cookieSession = require('cookie-session');
 const passport = require('passport');
 const SteamStrategy = require('passport-steam').Strategy;
 const path = require('path');
@@ -11,7 +10,6 @@ const gamesRouter = require('./routes/games');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Indicar a Express que confíe en el proxy de Vercel
 app.set('trust proxy', 1);
 
 const BASE_URL = process.env.REALM 
@@ -44,20 +42,25 @@ passport.use(new SteamStrategy(
 // --- Middlewares ---
 app.use(express.json());
 
-// Configuración de Sesiones compatible con Vercel Serverless
-app.use(session({
-  cookie: { 
-    maxAge: 86400000, // 24 horas
-    secure: process.env.NODE_ENV === 'production' || !!process.env.VERCEL_URL,
-    sameSite: 'lax'
-  },
-  store: new MemoryStore({
-    checkPeriod: 86400000 // Limpia sesiones expiradas cada 24h
-  }),
-  resave: true,
-  saveUninitialized: true,
-  secret: process.env.SESSION_SECRET || 'dev-secret-cambiame'
+// Sesiones basadas en Cookies cifradas (Perfecto para Vercel Serverless)
+app.use(cookieSession({
+  name: 'session',
+  keys: [process.env.SESSION_SECRET || 'dev-secret-cambiame'],
+  maxAge: 7 * 24 * 60 * 60 * 1000, // 7 días
+  sameSite: 'lax',
+  secure: process.env.NODE_ENV === 'production' || !!process.env.VERCEL_URL
 }));
+
+// Parche para compatibilidad de Passport con cookie-session en Serverless
+app.use((req, res, next) => {
+  if (req.session && !req.session.regenerate) {
+    req.session.regenerate = (cb) => cb();
+  }
+  if (req.session && !req.session.save) {
+    req.session.save = (cb) => cb();
+  }
+  next();
+});
 
 app.use(passport.initialize());
 app.use(passport.session());
@@ -80,11 +83,9 @@ app.get(
 );
 
 app.get('/auth/logout', (req, res) => {
-  req.logout(() => {
-    req.session.destroy(() => {
-      res.redirect('/');
-    });
-  });
+  req.logout();
+  req.session = null;
+  res.redirect('/');
 });
 
 app.get('/api/user', (req, res) => {
@@ -103,7 +104,7 @@ app.get('/api/user', (req, res) => {
 // --- API de juegos / logros (protegida) ---
 app.use('/api', requireAuth, gamesRouter);
 
-// Solo iniciamos el servidor si no estamos en producción (Vercel)
+// Solo iniciamos el servidor si no estamos en Vercel
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL_URL) {
   app.listen(PORT, () => {
     console.log(`✅ Servidor corriendo en http://localhost:${PORT}`);
