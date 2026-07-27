@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
+const MemoryStore = require('memorystore')(session);
 const passport = require('passport');
 const SteamStrategy = require('passport-steam').Strategy;
 const path = require('path');
@@ -10,14 +11,15 @@ const gamesRouter = require('./routes/games');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Construimos la URL base asegurando el protocolo https:// si no viene en las env
-const DOMAIN = process.env.VERCEL_URL 
-  ? `https://${process.env.VERCEL_URL}` 
-  : `http://localhost:${PORT}`;
+// Indicar a Express que confíe en el proxy de Vercel
+app.set('trust proxy', 1);
 
-// Damos prioridad a REALM y RETURN_URL de las variables de entorno si existen
-const REALM = process.env.REALM || `${DOMAIN}/`;
-const RETURN_URL = process.env.RETURN_URL || `${DOMAIN}/auth/steam/return`;
+const BASE_URL = process.env.REALM 
+  ? process.env.REALM.replace(/\/$/, '') 
+  : (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `http://localhost:${PORT}`);
+
+const REALM = `${BASE_URL}/`;
+const RETURN_URL = `${BASE_URL}/auth/steam/return`;
 
 if (!process.env.STEAM_API_KEY) {
   console.warn('\n⚠️  No definiste STEAM_API_KEY en las variables de entorno.\n');
@@ -41,12 +43,22 @@ passport.use(new SteamStrategy(
 
 // --- Middlewares ---
 app.use(express.json());
+
+// Configuración de Sesiones compatible con Vercel Serverless
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'dev-secret-cambiame',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 } // 7 días
+  cookie: { 
+    maxAge: 86400000, // 24 horas
+    secure: process.env.NODE_ENV === 'production' || !!process.env.VERCEL_URL,
+    sameSite: 'lax'
+  },
+  store: new MemoryStore({
+    checkPeriod: 86400000 // Limpia sesiones expiradas cada 24h
+  }),
+  resave: true,
+  saveUninitialized: true,
+  secret: process.env.SESSION_SECRET || 'dev-secret-cambiame'
 }));
+
 app.use(passport.initialize());
 app.use(passport.session());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -91,12 +103,11 @@ app.get('/api/user', (req, res) => {
 // --- API de juegos / logros (protegida) ---
 app.use('/api', requireAuth, gamesRouter);
 
-// Solo iniciamos el servidor local si no estamos en Vercel
-if (process.env.NODE_ENV !== 'production') {
+// Solo iniciamos el servidor si no estamos en producción (Vercel)
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL_URL) {
   app.listen(PORT, () => {
     console.log(`✅ Servidor corriendo en http://localhost:${PORT}`);
   });
 }
 
-// Requerido para Vercel Serverless Functions
 module.exports = app;
