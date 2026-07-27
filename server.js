@@ -10,13 +10,14 @@ const gamesRouter = require('./routes/games');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// En Vercel se crea la variable VERCEL_URL automáticamente
-const HOST = process.env.VERCEL_URL 
+// Construimos la URL base asegurando el protocolo https:// si no viene en las env
+const DOMAIN = process.env.VERCEL_URL 
   ? `https://${process.env.VERCEL_URL}` 
   : `http://localhost:${PORT}`;
 
-const REALM = process.env.REALM || `${HOST}/`;
-const RETURN_URL = process.env.RETURN_URL || `${HOST}/auth/steam/return`;
+// Damos prioridad a REALM y RETURN_URL de las variables de entorno si existen
+const REALM = process.env.REALM || `${DOMAIN}/`;
+const RETURN_URL = process.env.RETURN_URL || `${DOMAIN}/auth/steam/return`;
 
 if (!process.env.STEAM_API_KEY) {
   console.warn('\n⚠️  No definiste STEAM_API_KEY en las variables de entorno.\n');
@@ -90,7 +91,7 @@ app.get('/api/user', (req, res) => {
 // --- API de juegos / logros (protegida) ---
 app.use('/api', requireAuth, gamesRouter);
 
-// Solo iniciamos el servidor si no estamos corriendo en Vercel
+// Solo iniciamos el servidor local si no estamos en Vercel
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => {
     console.log(`✅ Servidor corriendo en http://localhost:${PORT}`);
